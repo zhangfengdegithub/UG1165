@@ -197,7 +197,7 @@ static ssize_t blink_counter_enable_store(struct device *dev,
     tmp = 1;
   }
                         
-  iowrite32(usigned int(tmp), blink_base_addr);
+  iowrite32(unsigned int(tmp), blink_base_addr);
 
   return count;
 }
