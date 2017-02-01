@@ -108,8 +108,16 @@ DEVICE_ATTR(blink_counter_enable, S_IRUSR | S_IWUSR, blink_counter_enable_show, 
 
 static irqreturn_t blink_irq(int irq, void *lp)
 {
-	printk(KERN_ALERT "blink interrupt\n");
-	return IRQ_HANDLED;
+  struct blink_local *lp = (struct blink_local *)p;
+  
+  dev_info(lp->dev, "blink interrupt\n");
+  
+  // Ack the interrupt in the custom ip, reg_intr_ack
+  iowrite32(0x1, lp->base_addr+INTR_OFFSET+12);
+  // Stop the counter, slv_reg0
+  iowrite32(0x0, lp->base_addr);
+
+  return IRQ_HANDLED;
 }
 
 static int blink_probe(struct platform_device *pdev)
@@ -180,6 +188,11 @@ static int blink_probe(struct platform_device *pdev)
 	  dev_err(dev, "Can not create counter enable sysfs file!\n");
 	  goto error3;
 	}
+
+	/* Interrupt Enable */
+	iowrite32(0x1, lp->base_addr+INTR_OFFSET+4);
+	/* Global Interrupt Enable */
+	iowrite32(0x1, lp->base_addr+INTR_OFFSET);	
 
 	return 0;
 error3:
