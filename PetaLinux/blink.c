@@ -108,14 +108,14 @@ DEVICE_ATTR(blink_counter_enable, S_IRUSR | S_IWUSR, blink_counter_enable_show, 
 
 static irqreturn_t blink_irq(int irq, void *lp)
 {
-  struct blink_local *lp = (struct blink_local *)p;
+  struct blink_local *p = (struct blink_local *)lp;
   
-  dev_info(lp->dev, "blink interrupt\n");
+  dev_info(p->dev, "blink interrupt\n");
   
   // Ack the interrupt in the custom ip, reg_intr_ack
-  iowrite32(0x1, lp->base_addr+INTR_OFFSET+12);
+  iowrite32(0x1, p->base_addr+INTR_OFFSET+12);
   // Stop the counter, slv_reg0
-  iowrite32(0x0, lp->base_addr);
+  iowrite32(0x0, p->base_addr);
 
   return IRQ_HANDLED;
 }
