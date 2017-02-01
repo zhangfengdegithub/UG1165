@@ -30,8 +30,8 @@ $ petalinux-config --get-hw-description=<path-to-directory-which-contains-hardwa
 ```bash
 $ petalinux-create -t modules --name <user-module-name> --enable
 ```
-
-Then copy the blink.c to the <plnx-proj-root>/project-spec/meta-user/recipes-modules/mymodule directory.
+Here we set the \<user-module-name\> to blink. \<user-module-name\> should be in lower case.
+Then replace the blink.c in the \<plnx-proj-root\>/project-spec/meta-user/recipes-modules/blink/blink directory.
 
 ```bash
 $ petalinux-build
