@@ -36,14 +36,15 @@ MODULE_DESCRIPTION
 
 #define DRIVER_NAME "Blink"
 
-// S_AXI_INTR interface OFFSET
-#define INTR_OFFSET 0x10000
-
 struct blink_local {
 	int irq;
 	unsigned long mem_start;
 	unsigned long mem_end;
 	void __iomem *base_addr;
+
+	unsigned long irq_mem_start;
+	unsigned long irq_mem_end;
+	void __iomem *irq_base_addr;
 };
 
 /**********************************************************************
@@ -98,7 +99,7 @@ static ssize_t blink_counter_enable_store(struct device *d,
 }
 
 
-DEVICE_ATTR(blink_counter_enable, S_IRUSR | S_IWUSR, blink_counter_enable_show, blink_counter_enable_store);
+DEVICE_ATTR(blink_counter_enable, S_IRUSR | S_IWUSR, &blink_counter_enable_show, &blink_counter_enable_store);
 
 
 /**********************************************************************
@@ -110,10 +111,10 @@ static irqreturn_t blink_irq(int irq, void *lp)
 {
   struct blink_local *p = (struct blink_local *)lp;
   
-  dev_info(p->dev, "blink interrupt\n");
+  printk(KERN_ALERT "blink interrupt\n");
   
   // Ack the interrupt in the custom ip, reg_intr_ack
-  iowrite32(0x1, p->base_addr+INTR_OFFSET+12);
+  iowrite32(0x1, p->irq_base_addr+12);
   // Stop the counter, slv_reg0
   iowrite32(0x0, p->base_addr);
 
@@ -135,6 +136,7 @@ static int blink_probe(struct platform_device *pdev)
 		dev_err(dev, "invalid address\n");
 		return -ENODEV;
 	}
+
 	lp = (struct blink_local *) kmalloc(sizeof(struct blink_local), GFP_KERNEL);
 	if (!lp) {
 		dev_err(dev, "Cound not allocate blink device\n");
@@ -143,6 +145,22 @@ static int blink_probe(struct platform_device *pdev)
 	dev_set_drvdata(dev, lp);
 	lp->mem_start = r_mem->start;
 	lp->mem_end = r_mem->end;
+	
+	dev_info(dev, "axi_mem_start = %lu.\n", lp->mem_start);
+	dev_info(dev, "axi_mem_end   = %lu.\n", lp->mem_end);
+
+	/* Get irq iospace for the device */
+	r_mem = platform_get_resource(pdev, IORESOURCE_MEM, 1);
+	if (!r_mem) {
+		dev_err(dev, "invalid address\n");
+		return -ENODEV;
+	}
+
+	lp->irq_mem_start = r_mem->start;
+	lp->irq_mem_end = r_mem->end;
+	
+	dev_info(dev, "irq_mem_start = %lu.\n", lp->irq_mem_start);
+	dev_info(dev, "irq_mem_end   = %lu.\n", lp->irq_mem_end);
 
 	if (!request_mem_region(lp->mem_start,
 				lp->mem_end - lp->mem_start + 1,
@@ -153,9 +171,26 @@ static int blink_probe(struct platform_device *pdev)
 		goto error1;
 	}
 
+	if (!request_mem_region(lp->irq_mem_start,
+				lp->irq_mem_end - lp->irq_mem_start + 1,
+				DRIVER_NAME)) {
+		dev_err(dev, "Couldn't lock memory region at %p\n",
+			(void *)lp->irq_mem_start);
+		rc = -EBUSY;
+		goto error1;
+	}
+
 	lp->base_addr = ioremap(lp->mem_start, lp->mem_end - lp->mem_start + 1);
 	if (!lp->base_addr) {
 		dev_err(dev, "blink: Could not allocate iomem\n");
+		rc = -EIO;
+		goto error2;
+	}
+	
+	/* IRQ memory map */
+	lp->irq_base_addr = ioremap(lp->irq_mem_start, lp->irq_mem_end - lp->irq_mem_start + 1);
+	if (!lp->irq_base_addr) {
+		dev_err(dev, "blink: Could not allocate irq iomem\n");
 		rc = -EIO;
 		goto error2;
 	}
@@ -177,9 +212,11 @@ static int blink_probe(struct platform_device *pdev)
 		goto error3;
 	}
 
-	dev_info(dev,"blink at 0x%08x mapped to 0x%08x, irq=%d\n",
+	dev_info(dev,"blink at 0x%08x mapped to 0x%08x, 0x%08x mapped to 0x%08x, irq=%d\n",
 		(unsigned int __force)lp->mem_start,
 		(unsigned int __force)lp->base_addr,
+		(unsigned int __force)lp->irq_mem_start,
+		(unsigned int __force)lp->irq_base_addr,
 		lp->irq);
 
 	/* Create the counter enable register device attribute in the sysfs*/ 
@@ -190,15 +227,16 @@ static int blink_probe(struct platform_device *pdev)
 	}
 
 	/* Interrupt Enable */
-	iowrite32(0x1, lp->base_addr+INTR_OFFSET+4);
+	iowrite32(0x1, lp->irq_base_addr+4);
 	/* Global Interrupt Enable */
-	iowrite32(0x1, lp->base_addr+INTR_OFFSET);	
+	iowrite32(0x1, lp->irq_base_addr);	
 
 	return 0;
 error3:
 	free_irq(lp->irq, lp);
 error2:
 	release_mem_region(lp->mem_start, lp->mem_end - lp->mem_start + 1);
+	release_mem_region(lp->irq_mem_start, lp->irq_mem_end - lp->irq_mem_start + 1);
 error1:
 	kfree(lp);
 	dev_set_drvdata(dev, NULL);
@@ -211,6 +249,7 @@ static int blink_remove(struct platform_device *pdev)
 	struct blink_local *lp = dev_get_drvdata(dev);
 	free_irq(lp->irq, lp);
 	release_mem_region(lp->mem_start, lp->mem_end - lp->mem_start + 1);
+	release_mem_region(lp->irq_mem_start, lp->irq_mem_end - lp->irq_mem_start + 1);
 	kfree(lp);
 	dev_set_drvdata(dev, NULL);
 	return 0;
